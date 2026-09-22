@@ -156,5 +156,8 @@
     "lib",
     "lib-esm",
     "typings"
-  ]
+  ],
+  "bin": {
+    "diff2html": "lib/cli.js"
+  }
 }
