@@ -1,10 +1,13 @@
 import { closeTags, nodeStream, mergeStreams, getLanguage } from './highlight.js-helpers';
 
-import { html, Diff2HtmlConfig, defaultDiff2HtmlConfig } from '../../diff2html';
+import { html, parse, Diff2HtmlConfig, defaultDiff2HtmlConfig } from '../../diff2html';
 import { DiffFile } from '../../types';
+import { getHtmlId } from '../../render-utils';
 import { HighlightResult, HLJSApi } from 'highlight.js';
+import { ContextExpansionConfig, ContextExpansionUI } from './diff2html-ui-context';
+import { ReviewUI, ReviewUIConfig } from './diff2html-ui-review';
 
-export interface Diff2HtmlUIConfig extends Diff2HtmlConfig {
+export interface Diff2HtmlUIConfig extends Diff2HtmlConfig, ContextExpansionConfig, ReviewUIConfig {
   synchronisedScroll?: boolean;
   highlight?: boolean;
   fileListToggle?: boolean;
@@ -17,6 +20,12 @@ export interface Diff2HtmlUIConfig extends Diff2HtmlConfig {
   smartSelection?: boolean;
   fileContentToggle?: boolean;
   stickyFileHeaders?: boolean;
+  /** Enables dynamic context expansion; requires `contextProvider` or `fileContents`. */
+  contextExpansion?: boolean;
+  /** Enables review comments; adds `exportReview` / `importReview` to the UI instance. */
+  review?: boolean;
+  /** Adds a copy-to-clipboard button next to each file name; default is `true`. */
+  fileCopyButton?: boolean;
 }
 
 export const defaultDiff2HtmlUIConfig = {
@@ -33,6 +42,9 @@ export const defaultDiff2HtmlUIConfig = {
   smartSelection: true,
   fileContentToggle: true,
   stickyFileHeaders: true,
+  contextExpansion: true,
+  review: false,
+  fileCopyButton: true,
 };
 
 export class Diff2HtmlUI {
@@ -40,14 +52,31 @@ export class Diff2HtmlUI {
   readonly diffHtml: string;
   readonly targetElement: HTMLElement;
   readonly hljs: HLJSApi | null = null;
+  readonly review?: ReviewUI;
+
+  private readonly diffFiles: DiffFile[];
+  private readonly contextExpansion?: ContextExpansionUI;
 
   currentSelectionColumnId = -1;
 
   constructor(target: HTMLElement, diffInput?: string | DiffFile[], config: Diff2HtmlUIConfig = {}, hljs?: HLJSApi) {
     this.config = { ...defaultDiff2HtmlUIConfig, ...config };
+    this.diffFiles =
+      diffInput === undefined ? [] : typeof diffInput === 'string' ? parse(diffInput, this.config) : diffInput;
     this.diffHtml = diffInput !== undefined ? html(diffInput, this.config) : target.innerHTML;
     this.targetElement = target;
     if (hljs !== undefined) this.hljs = hljs;
+    if (this.config.review) {
+      this.review = new ReviewUI({ author: config.author, onReviewChange: config.onReviewChange });
+    }
+    if (this.config.contextExpansion && (config.contextProvider !== undefined || config.fileContents !== undefined)) {
+      this.contextExpansion = new ContextExpansionUI({
+        contextProvider: config.contextProvider,
+        fileContents: config.fileContents,
+        pathResolver: config.pathResolver,
+        expandChunkSize: config.expandChunkSize,
+      });
+    }
   }
 
   draw(): void {
@@ -57,6 +86,58 @@ export class Diff2HtmlUI {
     if (this.config.fileListToggle) this.fileListToggle(this.config.fileListStartVisible);
     if (this.config.fileContentToggle) this.fileContentToggle();
     if (this.config.stickyFileHeaders) this.stickyFileHeaders();
+    if (this.config.fileCopyButton) this.fileCopyButtons();
+    if (this.contextExpansion !== undefined) this.wireContextExpansion();
+    if (this.review !== undefined) {
+      this.review.wireToolbar(this.targetElement);
+      this.review.wire(this.targetElement, this.diffFiles);
+    }
+  }
+
+  /** Returns the current review as JSON (requires `review: true`). */
+  exportReview(): string {
+    if (this.review === undefined) throw new Error('Review is not enabled. Pass `review: true` in the config.');
+    return this.review.exportReview();
+  }
+
+  /** Loads a review previously produced by `exportReview` (requires `review: true`). */
+  importReview(json: string): void {
+    if (this.review === undefined) throw new Error('Review is not enabled. Pass `review: true` in the config.');
+    this.review.importReview(json);
+  }
+
+  private fileCopyButtons(): void {
+    this.targetElement.querySelectorAll<HTMLElement>('.d2h-file-header').forEach(header => {
+      const wrapper = header.querySelector('.d2h-file-name-wrapper');
+      const fileName = header.querySelector<HTMLElement>('.d2h-file-name');
+      if (wrapper === null || fileName === null) return;
+
+      const file = this.diffFiles.find(f => getHtmlId(f) === header.closest('.d2h-file-wrapper')?.id);
+      const copyText = file === undefined ? (fileName.textContent ?? '') : anchorCopyPath(file);
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'd2h-file-copy-btn';
+      button.title = '复制文件路径';
+      button.textContent = '复制';
+      button.addEventListener('click', () => {
+        void copyToClipboard(copyText).then(() => {
+          button.textContent = '已复制';
+          window.setTimeout(() => (button.textContent = '复制'), 1200);
+          return null;
+        });
+      });
+
+      fileName.parentNode!.insertBefore(button, fileName.nextSibling);
+    });
+  }
+
+  private wireContextExpansion(): void {
+    this.diffFiles.forEach(file => {
+      if (!this.contextExpansion!.canExpand(file)) return;
+      const wrapper = this.targetElement.querySelector(`#${getHtmlId(file)}`);
+      if (wrapper !== null) this.contextExpansion!.wireFile(file, wrapper);
+    });
   }
 
   synchronisedScroll(): void {
@@ -222,4 +303,25 @@ export class Diff2HtmlUI {
   private isElement(arg?: unknown): arg is Element {
     return arg !== null && (arg as Element)?.classList !== undefined;
   }
+}
+
+function anchorCopyPath(file: DiffFile): string {
+  return file.newName === '/dev/null' ? file.oldName : file.newName;
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard !== undefined) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  // Fallback for non-secure contexts (plain http pages).
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
 }

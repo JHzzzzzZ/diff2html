@@ -19,28 +19,29 @@ diff2html generates pretty HTML diffs from git diff or unified diff output.
 
 <!-- toc -->
 
-- [Features](#features)
-- [Online Example](#online-example)
-- [Distributions](#distributions)
-- [Usage](#usage)
-- [Diff Text Input](#diff-text-input)
-- [Diff2HtmlUI Usage](#diff2htmlui-usage)
-  - [Diff2HtmlUI API](#diff2htmlui-api)
-  - [Diff2HtmlUI Configuration](#diff2htmlui-configuration)
-  - [Diff2HtmlUI Browser](#diff2htmlui-browser)
-  - [Diff2HtmlUI Examples](#diff2htmlui-examples)
-- [Diff2Html Usage](#diff2html-usage)
-  - [Diff2Html API](#diff2html-api)
-  - [Diff2Html Configuration](#diff2html-configuration)
-  - [Diff2Html Browser](#diff2html-browser)
-  - [Diff2Html NPM / Node.js Library](#diff2html-npm--nodejs-library)
-  - [Diff2Html Examples](#diff2html-examples)
-- [Troubleshooting](#troubleshooting)
-  - [1. Out of memory or Slow execution](#1-out-of-memory-or-slow-execution)
-- [Contribute](#contribute)
-- [Contributors](#contributors)
-- [License](#license)
-- [Thanks](#thanks)
+'-' [Features](#features)
+'-' [Online Example](#online-example)
+'-' [Distributions](#distributions)
+'-' [Usage](#usage)
+'-' [Diff Text Input](#diff-text-input)
+'-' [Diff2HtmlUI Usage](#diff2htmlui-usage)
+  '-' [Diff2HtmlUI API](#diff2htmlui-api)
+  '-' [Diff2HtmlUI Configuration](#diff2htmlui-configuration)
+  '-' [Context expansion and review](#context-expansion-and-review)
+  '-' [Diff2HtmlUI Browser](#diff2htmlui-browser)
+  '-' [Diff2HtmlUI Examples](#diff2htmlui-examples)
+'-' [Diff2Html Usage](#diff2html-usage)
+  '-' [Diff2Html API](#diff2html-api)
+  '-' [Diff2Html Configuration](#diff2html-configuration)
+  '-' [Diff2Html Browser](#diff2html-browser)
+  '-' [Diff2Html NPM / Node.js Library](#diff2html-npm--nodejs-library)
+  '-' [Diff2Html Examples](#diff2html-examples)
+'-' [Troubleshooting](#troubleshooting)
+  '-' [1. Out of memory or Slow execution](#1-out-of-memory-or-slow-execution)
+'-' [Contribute](#contribute)
+'-' [Contributors](#contributors)
+'-' [License](#license)
+'-' [Thanks](#thanks)
 
 <!-- tocstop -->
 
@@ -164,7 +165,44 @@ stickyFileHeaders(): void
 - `fileListStartVisible`: choose if the file summary list starts visible: `true` or `false`, default is `false`
 - `fileContentToggle`: allow each file contents to be toggled: `true` or `false`, default is `true`
 - `stickyFileHeaders`: make file headers sticky: `true` or `false`, default is `true`
+- `contextExpansion`: enable dynamic context expansion, requires a content source (see below); default is `true`, no-op
+  until `contextProvider` or `fileContents` is set
+- `contextProvider`: async callback that returns the real file lines for a range:
+  `(path: string, from: number, to: number) => Promise<string[]>`
+- `fileContents`: full file contents indexed by real path (`Map<string, string[]>`); used when no `contextProvider` is
+  given
+- `pathResolver`: maps a diff path (e.g. `a/src/app.ts`) to the real path used for content lookup; defaults to stripping
+  the `a/` / `b/` prefix
+- `expandChunkSize`: number of context lines revealed per expand click, default is `20`
+- `review`: enable review comments on lines and files: `true` or `false`, default is `false`
+- `author`: author name stamped on review comments, default is `anonymous`
+- `onReviewChange`: callback invoked with the review JSON after every comment change
+- `fileCopyButton`: add a copy-to-clipboard button next to each file name (copies the file path): `true` or `false`,
+  default is `true`
 - [All the options](#diff2html-configuration) from Diff2Html are also valid configurations in Diff2HtmlUI
+
+### Context expansion and review
+
+With a content source the rendered diff shows "expand" buttons around each hunk that pull in the surrounding real file
+lines (directional: up or down, `expandChunkSize` lines per click). With `review: true` you can click a line number to
+comment on that line, or the header button to comment on the whole file; comments are anchored to
+`(file, line number, side)` and survive context expansion.
+
+```ts
+const ui = new Diff2HtmlUI(target, diffString, {
+  review: true,
+  onReviewChange: json => saveSomewhere(json),
+  contextProvider: async (path, from, to) => fetchLines(path, from, to),
+});
+ui.draw();
+
+const json = ui.exportReview(); // serialize comments to JSON
+ui.importReview(json); // restore them later
+```
+
+Context expansion and review work in both `line-by-line` and `side-by-side` output formats. In `side-by-side` mode the
+revealed chunk is inserted into both panes with the left pane renumbered to match the old file, and review rows inserted
+into one pane are mirrored by a hidden spacer row in the other so both panes stay row-aligned.
 
 ### Diff2HtmlUI Browser
 

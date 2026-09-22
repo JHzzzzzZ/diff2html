@@ -201,6 +201,7 @@
   display: inline-block;
   white-space: nowrap;
   user-select: none;
+  position: relative;
   width: calc(100% - 16em);
   /* Compensate for the absolute positioning of the line numbers */
   padding: 0 8em;
@@ -210,9 +211,24 @@
   display: inline-block;
   white-space: nowrap;
   user-select: none;
+  position: relative;
   width: calc(100% - 9em);
   /* Compensate for the absolute positioning of the line numbers */
   padding: 0 4.5em;
+}
+
+/* Take the +/- prefix out of the content flow and park it in the gutter, so
+   every line's content starts at the same x position. */
+.d2h-code-line .d2h-code-line-prefix {
+  position: absolute;
+  left: 7.5em;
+  top: 0;
+}
+
+.d2h-code-side-line .d2h-code-line-prefix {
+  position: absolute;
+  left: 3.75em;
+  top: 0;
 }
 
 .d2h-code-line-ctn {
@@ -283,6 +299,9 @@
   border: solid var(--d2h-line-border-color);
   border-width: 0 1px 0 1px;
   cursor: pointer;
+  /* The code line divs are positioned (for the +/- gutter), so the number
+     cells need a stacking order of their own to stay clickable. */
+  z-index: 1;
 }
 
 .d2h-code-linenumber:after {
@@ -302,6 +321,8 @@
   border-width: 0 1px 0 1px;
   cursor: pointer;
   overflow: hidden;
+  /* See .d2h-code-linenumber: keeps the number cells clickable. */
+  z-index: 1;
   text-overflow: ellipsis;
   padding: 0 0.5em 0 0.5em;
 }
@@ -346,6 +367,15 @@
   background-color: var(--d2h-info-bg-color);
   color: var(--d2h-dim-color);
   border-color: var(--d2h-info-border-color);
+}
+
+/* Hunk headers (`@@ ... @@` and function context) are selectable and copyable.
+   Only the info cell is re-enabled, so code lines keep the smart-selection
+   behaviour of `.d2h-code-line`. */
+td.d2h-info > .d2h-code-line,
+td.d2h-info > .d2h-code-side-line {
+  user-select: text;
+  cursor: text;
 }
 
 .d2h-file-diff .d2h-del.d2h-change {
@@ -738,4 +768,129 @@
   .d2h-auto-color-scheme .d2h-moved-tag {
     border: var(--d2h-dark-moved-label-color) 1px solid;
   }
+}
+
+.d2h-context-expand-row td.d2h-context-expand {
+  text-align: center;
+  padding: 2px 0;
+  background-color: var(--d2h-empty-placeholder-bg-color);
+}
+
+.d2h-context-expand-row button {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--d2h-dim-color);
+  background: none;
+  border: none;
+  padding: 2px 8px;
+}
+
+.d2h-context-expand-row button:hover {
+  color: var(--d2h-file-header-border-color);
+  text-decoration: underline;
+}
+
+.d2h-file-header .d2h-review-file-btn {
+  margin-left: auto;
+  cursor: pointer;
+  font-size: 12px;
+  background: none;
+  border: 1px solid var(--d2h-border-color);
+  border-radius: 3px;
+  padding: 2px 8px;
+}
+
+.d2h-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Keep the file path in charge of the free space; buttons never wrap or shrink. */
+.d2h-file-header .d2h-file-name-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.d2h-file-header .d2h-file-collapse,
+.d2h-file-header button {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.d2h-review-file-panel {
+  border-top: 1px dashed var(--d2h-border-color);
+}
+
+.d2h-review-file-panel .d2h-review-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.d2h-review-editor-body {
+  padding: 4px 8px;
+  background-color: var(--d2h-file-header-bg-color);
+}
+
+.d2h-review-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid var(--d2h-border-color);
+  border-radius: 3px;
+  resize: vertical;
+}
+
+.d2h-review-comment {
+  margin: 4px 8px;
+  padding: 6px 8px;
+  background-color: var(--d2h-file-header-bg-color);
+  border: 1px solid var(--d2h-border-color);
+  border-radius: 3px;
+  font-family: sans-serif;
+  font-size: 13px;
+}
+
+.d2h-review-meta {
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+
+.d2h-review-actions button,
+.d2h-review-editor-body button {
+  cursor: pointer;
+  font-size: 12px;
+  margin-right: 4px;
+  margin-top: 4px;
+}
+
+.d2h-review-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 1em;
+}
+
+.d2h-review-toolbar button {
+  cursor: pointer;
+  font-size: 13px;
+  border: 1px solid var(--d2h-border-color);
+  border-radius: 3px;
+  background: none;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.d2h-file-copy-btn {
+  cursor: pointer;
+  margin-left: 8px;
+  font-size: 12px;
+  background: none;
+  border: 1px solid var(--d2h-border-color);
+  border-radius: 3px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
