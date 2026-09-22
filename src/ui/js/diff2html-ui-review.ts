@@ -190,6 +190,13 @@ export class ReviewUI {
     side: CommentSide,
     twinBody: Element | null,
   ): void {
+    // Repeated clicks on the same line must not stack editors.
+    const next = row.nextElementSibling;
+    if (next !== null && next.classList.contains('d2h-review-editor')) {
+      next.querySelector('textarea')?.focus();
+      return;
+    }
+
     const tbody = row.parentNode as Element;
     const index = Array.from(tbody.children).indexOf(row);
 

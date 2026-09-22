@@ -202,9 +202,10 @@
   white-space: nowrap;
   user-select: none;
   position: relative;
-  width: calc(100% - 16em);
-  /* Compensate for the absolute positioning of the line numbers */
-  padding: 0 8em;
+  width: calc(100% - 16.7em);
+  /* Compensate for the absolute positioning of the line numbers; the extra
+     left room keeps the +/- prefix clear of the code text. */
+  padding: 0 8.35em;
 }
 
 .d2h-code-side-line {
@@ -212,9 +213,10 @@
   white-space: nowrap;
   user-select: none;
   position: relative;
-  width: calc(100% - 9em);
-  /* Compensate for the absolute positioning of the line numbers */
-  padding: 0 4.5em;
+  width: calc(100% - 9.7em);
+  /* Compensate for the absolute positioning of the line numbers; the extra
+     left room keeps the +/- prefix clear of the code text. */
+  padding: 0 4.85em;
 }
 
 /* Take the +/- prefix out of the content flow and park it in the gutter, so
@@ -227,7 +229,8 @@
 
 .d2h-code-side-line .d2h-code-line-prefix {
   position: absolute;
-  left: 3.75em;
+  /* Keep the sign flush after the 4em number cell, like line-by-line. */
+  left: 4em;
   top: 0;
 }
 
