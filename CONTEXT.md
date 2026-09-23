@@ -1,35 +1,16 @@
-# Context
+# Diff2Html
 
-## Glossary
+把 git / unified diff 解析并渲染成可交互 HTML 的库（npm 包 + CLI +
+diff2html.xyz 网站）。本文件是术语表：只收本项目特有的领域概念，不记实现细节。
 
-### Review
+## Language
 
-A set of user comments attached to a rendered diff. A Review contains line-level comments (anchored to a file and line
-number) and file-level comments (attached to a whole file). Reviews can be exported to and imported from JSON.
+**Gap**: 一个文件内未被渲染的行区间——相邻两个 hunk 之间、首个 hunk 之前到文件头、末个 hunk 之后到文件尾。Gap 是上下文展开的基本单位。
+_Avoid_: context region、折叠区
 
-### Line comment
+**Hidden range (`hiddenTop` / `hiddenBottom`)**:
+Gap 在当前时刻仍未揭示的行区间，用新文件行号的一对端点表示。两端随揭示向中间收缩，相遇即 gap 关闭。`hiddenBottom`
+为空表示文件尾长度未知（内容源未提供总行数）。 _Avoid_: boundary / bound（已被取代的一对近义旧名）
 
-A comment anchored to one line of one file. The anchor is `(filePath, lineNumber)`, where `lineNumber` is the new-file
-line number for added/context lines and the old-file line number for deleted lines. Expansion of surrounding context
-does not move or invalidate anchors.
-
-### File comment
-
-A comment attached to a whole file, identified by its file path. Has no line anchor.
-
-### Context expansion
-
-Revealing real file content that surrounds a diff hunk, without changing the diff itself. Expansion is directional (`up`
-reveals lines above the hunk, `down` reveals lines below), reveals a bounded number of lines per click
-(`expandChunkSize`), and shows a placeholder with the count of still-hidden lines when the file has more content beyond
-the revealed range.
-
-### Context provider
-
-The caller-supplied source of real file content. Either a callback `(path, from, to) => Promise<string[]>` returning the
-requested line range, an in-memory full-content map (`fileContents`), or both; the callback wins when both are present.
-
-### Path resolver
-
-A caller-supplied mapping from a diff path (as it appears in the diff text, e.g. `a/src/app.ts`) to a real file path
-used for content lookup and review anchors.
+**Reveal（揭示）**: 应用户点击，把 hidden range 贴近某一侧 hunk 的一段行（一个 chunk）插入渲染输出，并同步收缩 hidden
+range。同一个 gap 的两侧可各自触发 reveal，共享同一份 hidden range。 _Avoid_: 展开（仅用于"展开更多"按钮文案）、load
