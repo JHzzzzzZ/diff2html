@@ -10,11 +10,13 @@ export interface ReviewUIConfig {
 type Format = 'line-by-line' | 'side-by-side';
 
 /**
- * Wires review comments into a rendered diff: click a line's number cell to
- * comment on that line, or the header button to comment on the whole file.
- * Comments are anchored to (filePath, lineNumber, side) and survive context
- * expansion. In side-by-side mode, rows inserted into one table are mirrored
- * by a hidden twin row in the other table so both sides stay row-aligned.
+ * Wires review comments into a rendered diff: hovering a line reveals an
+ * animated comment button in its number gutter, and clicking either the button
+ * or the number cell itself comments on that line. The header button comments
+ * on the whole file. Comments are anchored to (filePath, lineNumber, side) and
+ * survive context expansion. In side-by-side mode, rows inserted into one table
+ * are mirrored by a hidden twin row in the other table so both sides stay
+ * row-aligned.
  */
 export class ReviewUI {
   readonly store = new ReviewStore();
@@ -23,6 +25,8 @@ export class ReviewUI {
   private readonly sessionOwned = new Set<string>();
   private target: HTMLElement | null = null;
   private files: DiffFile[] = [];
+  /** Number cell currently showing the hover affordance, if any. */
+  private hintCell: HTMLTableCellElement | null = null;
 
   constructor(config: ReviewUIConfig = {}) {
     this.author = config.author ?? 'anonymous';
@@ -44,6 +48,7 @@ export class ReviewUI {
 
       this.wireFileCommentButton(wrapper, file);
       this.wireLineCommentClicks(wrapper, file);
+      this.wireLineCommentHints(wrapper, file);
     });
     this.renderAll();
   }
@@ -142,45 +147,133 @@ export class ReviewUI {
       const cell = (event.target as HTMLElement).closest('td');
       if (cell === null) return;
 
-      const isSideCell = cell.classList.contains('d2h-code-side-linenumber');
-      const isLineCell = cell.classList.contains('d2h-code-linenumber');
-      if (!isSideCell && !isLineCell) return;
+      const anchor = this.resolveAnchor(wrapper, cell as HTMLTableCellElement);
+      if (anchor === null) return;
 
-      const row = cell.closest('tr');
-      if (row === null || row.querySelector('.d2h-review-editor') !== null) return;
-
-      let side: CommentSide;
-      let lineNumber: number;
-      if (isSideCell) {
-        const tables = wrapper.querySelectorAll('.d2h-files-diff table');
-        side = tables.length === 2 && cell.closest('table') === tables[0] ? 'old' : 'new';
-        lineNumber = Number(cell.textContent?.trim());
-      } else {
-        const num1 = row.querySelector<HTMLElement>('.line-num1')?.textContent ?? '';
-        const num2 = row.querySelector<HTMLElement>('.line-num2')?.textContent ?? '';
-        if (num2 !== '') {
-          side = 'new';
-          lineNumber = Number(num2);
-        } else if (num1 !== '') {
-          side = 'old';
-          lineNumber = Number(num1);
-        } else {
-          return; // hunk header row
-        }
-      }
-      if (!Number.isInteger(lineNumber) || lineNumber < 1) return; // filler / header row
-
-      let twinBody: Element | null = null;
-      if (isSideCell) {
-        const bodies = wrapper.querySelectorAll('.d2h-files-diff table > tbody');
-        const own = cell.closest('tbody');
-        if (bodies.length === 2 && own !== null) {
-          twinBody = own === bodies[0] ? bodies[1] : bodies[0];
-        }
-      }
-
-      this.openLineEditor(row, file, lineNumber, side, twinBody);
+      this.openLineEditor(anchor.row, file, anchor.lineNumber, anchor.side, anchor.twinBody);
     });
+  }
+
+  /**
+   * Delegated hover handling: reveals the comment affordance in the number
+   * gutter of the line under the pointer, so the click-to-comment behaviour is
+   * discoverable. Rows revealed later by context expansion work too.
+   */
+  private wireLineCommentHints(wrapper: HTMLElement, file: DiffFile): void {
+    wrapper.addEventListener('mouseover', event => {
+      const target = event.target as HTMLElement;
+      const row = target.closest('tr');
+      if (row !== null && row === this.hintCell?.closest('tr')) {
+        // Same line: only the ghost / solid state follows the pointer.
+        this.setHintSolid(this.isOverNumbers(target));
+        return;
+      }
+
+      this.hideHint();
+      if (row === null) return;
+
+      const cell = row.querySelector<HTMLTableCellElement>('.d2h-code-linenumber, .d2h-code-side-linenumber');
+      if (cell === null || this.resolveAnchor(wrapper, cell) === null) return;
+
+      this.showHint(cell, wrapper, file, this.isOverNumbers(target));
+    });
+
+    wrapper.addEventListener('mouseleave', () => this.hideHint());
+  }
+
+  /** True while the pointer is on the number cell itself rather than on the code. */
+  private isOverNumbers(target: HTMLElement): boolean {
+    const cell = target.closest('td');
+    if (cell === null) return false;
+    return cell.classList.contains('d2h-code-linenumber') || cell.classList.contains('d2h-code-side-linenumber');
+  }
+
+  private showHint(cell: HTMLTableCellElement, wrapper: HTMLElement, file: DiffFile, solid: boolean): void {
+    const hint = this.ensureHint(cell, wrapper, file);
+    this.hintCell = cell;
+    // Read a layout property so a button inserted in this same tick animates in
+    // instead of popping into place.
+    void hint.offsetWidth;
+    hint.classList.add('d2h-review-hint-on');
+    hint.classList.toggle('d2h-review-hint-solid', solid);
+  }
+
+  private setHintSolid(solid: boolean): void {
+    this.hintCell?.querySelector('.d2h-review-hint')?.classList.toggle('d2h-review-hint-solid', solid);
+  }
+
+  private hideHint(): void {
+    this.hintCell?.querySelector('.d2h-review-hint')?.classList.remove('d2h-review-hint-on');
+    this.hintCell = null;
+  }
+
+  /** Creates the affordance once per number cell, on first hover. */
+  private ensureHint(cell: HTMLTableCellElement, wrapper: HTMLElement, file: DiffFile): HTMLButtonElement {
+    const existing = cell.querySelector<HTMLButtonElement>('.d2h-review-hint');
+    if (existing !== null) return existing;
+
+    const hint = document.createElement('button');
+    hint.type = 'button';
+    hint.className = 'd2h-review-hint';
+    hint.title = '添加行评论';
+    hint.setAttribute('aria-label', '添加行评论');
+    hint.textContent = '💬';
+    hint.addEventListener('click', event => {
+      event.preventDefault();
+      // Keep the wrapper's click handler from opening a second editor.
+      event.stopPropagation();
+      const anchor = this.resolveAnchor(wrapper, cell);
+      this.hideHint();
+      if (anchor !== null) this.openLineEditor(anchor.row, file, anchor.lineNumber, anchor.side, anchor.twinBody);
+    });
+
+    cell.appendChild(hint);
+    return hint;
+  }
+
+  /** Maps a line-number cell to the comment anchor it stands for, or `null` for filler and hunk header rows. */
+  private resolveAnchor(
+    wrapper: HTMLElement,
+    cell: HTMLTableCellElement,
+  ): { row: HTMLTableRowElement; lineNumber: number; side: CommentSide; twinBody: Element | null } | null {
+    const isSideCell = cell.classList.contains('d2h-code-side-linenumber');
+    const isLineCell = cell.classList.contains('d2h-code-linenumber');
+    if (!isSideCell && !isLineCell) return null;
+
+    const row = cell.closest('tr');
+    if (row === null || row.querySelector('.d2h-review-editor') !== null) return null;
+
+    let side: CommentSide;
+    let lineNumber: number;
+    if (isSideCell) {
+      const tables = wrapper.querySelectorAll('.d2h-files-diff table');
+      side = tables.length === 2 && cell.closest('table') === tables[0] ? 'old' : 'new';
+      lineNumber = this.cellLineNumber(cell);
+    } else {
+      const num1 = row.querySelector<HTMLElement>('.line-num1')?.textContent ?? '';
+      const num2 = row.querySelector<HTMLElement>('.line-num2')?.textContent ?? '';
+      if (num2 !== '') {
+        side = 'new';
+        lineNumber = Number(num2);
+      } else if (num1 !== '') {
+        side = 'old';
+        lineNumber = Number(num1);
+      } else {
+        return null; // hunk header row
+      }
+    }
+    if (!Number.isInteger(lineNumber) || lineNumber < 1) return null; // filler / header row
+
+    let twinBody: Element | null = null;
+    if (isSideCell) {
+      const bodies = wrapper.querySelectorAll('.d2h-files-diff table > tbody');
+      const own = cell.closest('tbody');
+      if (bodies.length === 2 && own !== null) {
+        twinBody = own === bodies[0] ? bodies[1] : bodies[0];
+      }
+    }
+
+    return { row, lineNumber, side, twinBody };
   }
 
   private openLineEditor(
@@ -357,8 +450,23 @@ export class ReviewUI {
 
   private sideRowMatches(row: HTMLTableRowElement, comment: Comment): boolean {
     if (row.querySelector('.d2h-review-editor') !== null) return false;
-    const num = row.querySelector('td.d2h-code-side-linenumber')?.textContent?.trim() ?? '';
-    return num !== '' && Number(num) === comment.lineNumber;
+    const cell = row.querySelector<HTMLTableCellElement>('td.d2h-code-side-linenumber');
+    if (cell === null) return false;
+    return this.cellLineNumber(cell) === comment.lineNumber;
+  }
+
+  /**
+   * Line number printed by a number cell. Only the cell's own text nodes are
+   * read: the comment affordance lives inside the cell too, and its icon must
+   * not leak into the number.
+   */
+  private cellLineNumber(cell: HTMLTableCellElement): number {
+    const own = Array.from(cell.childNodes)
+      .filter(node => node.nodeType === Node.TEXT_NODE)
+      .map(node => node.textContent ?? '')
+      .join('')
+      .trim();
+    return own === '' ? NaN : Number(own);
   }
 
   private buildCommentRow(comment: Comment, hidden: boolean): HTMLTableRowElement {

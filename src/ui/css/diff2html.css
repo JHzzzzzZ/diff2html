@@ -897,3 +897,85 @@ td.d2h-info > .d2h-code-side-line {
   padding: 2px 8px;
   white-space: nowrap;
 }
+
+/* Comment affordance: a button parked in the number gutter, revealed while the
+   pointer is over a line. Faint over the code, solid once the pointer is on the
+   numbers. Hidden with `pointer-events: none` so it never intercepts clicks on
+   the numbers themselves. */
+.d2h-review-hint {
+  position: absolute;
+  /* Centred between the old/new number columns of the line-by-line cell. */
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 1.5em;
+  height: 1.5em;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  direction: ltr;
+  font-family: sans-serif;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--d2h-dim-color);
+  background-color: var(--d2h-bg-color);
+  border: 1px solid var(--d2h-border-color);
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.4);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    background-color 0.14s ease,
+    border-color 0.14s ease;
+}
+
+/* Ghost: the pointer is somewhere on the line. */
+.d2h-review-hint.d2h-review-hint-on {
+  opacity: 0.7;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(0.92);
+}
+
+/* Solid: the pointer reached the number itself. */
+.d2h-review-hint.d2h-review-hint-on.d2h-review-hint-solid {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  color: var(--d2h-moved-label-color);
+  background-color: var(--d2h-selected-color);
+  border-color: var(--d2h-moved-label-color);
+  animation: d2h-review-hint-pulse 1.6s ease-out infinite;
+}
+
+.d2h-review-hint:hover {
+  color: var(--d2h-moved-label-color);
+  border-color: var(--d2h-moved-label-color);
+}
+
+/* Side-by-side numbers are right aligned, so the left of that cell is free. */
+.d2h-code-side-linenumber .d2h-review-hint {
+  left: 0.85em;
+}
+
+@keyframes d2h-review-hint-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(53, 114, 176, 0.45);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px rgba(53, 114, 176, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .d2h-review-hint,
+  .d2h-review-hint.d2h-review-hint-on,
+  .d2h-review-hint.d2h-review-hint-on.d2h-review-hint-solid {
+    transition: none;
+    animation: none;
+  }
+}

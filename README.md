@@ -184,8 +184,9 @@ stickyFileHeaders(): void
 ### Context expansion and review
 
 With a content source the rendered diff shows "expand" buttons around each hunk that pull in the surrounding real file
-lines (directional: up or down, `expandChunkSize` lines per click). With `review: true` you can click a line number to
-comment on that line, or the header button to comment on the whole file; comments are anchored to
+lines (directional: up or down, `expandChunkSize` lines per click). With `review: true` hovering a line fades an
+animated comment button into its number gutter (faint over the code, solid over the numbers): click that button, or the
+line number itself, to comment on the line. The header button comments on the whole file. Comments are anchored to
 `(file, line number, side)` and survive context expansion.
 
 ```ts
