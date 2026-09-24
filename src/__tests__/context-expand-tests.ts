@@ -1,4 +1,12 @@
-import { commitReveal, GapState, nextRevealRange, unchangedLineDelta } from '../context-expand';
+import {
+  commitReveal,
+  directionToward,
+  GapState,
+  isLineRevealed,
+  lineInGap,
+  nextRevealRange,
+  unchangedLineDelta,
+} from '../context-expand';
 
 describe('nextRevealRange', () => {
   describe('down direction', () => {
@@ -108,6 +116,72 @@ describe('commitReveal', () => {
     const outcome = commitReveal({ hiddenTop: 10, hiddenBottom: 50 }, 'down', { from: 11, to: 20 });
     expect(outcome.state).toEqual({ hiddenTop: 20, hiddenBottom: 50 });
     expect(outcome.remaining).toBe(30);
+  });
+});
+
+describe('isLineRevealed', () => {
+  it('counts lines above the top edge and below the bottom edge as rendered', () => {
+    const state: GapState = { hiddenTop: 10, hiddenBottom: 50 };
+    expect(isLineRevealed(state, 10)).toBe(true);
+    expect(isLineRevealed(state, 1)).toBe(true);
+    expect(isLineRevealed(state, 11)).toBe(false);
+    expect(isLineRevealed(state, 49)).toBe(false);
+    expect(isLineRevealed(state, 50)).toBe(true);
+    expect(isLineRevealed(state, 80)).toBe(true);
+  });
+
+  it('never reports a line of an open-bottom gap as rendered from below', () => {
+    const state: GapState = { hiddenTop: 90, hiddenBottom: null };
+    expect(isLineRevealed(state, 91)).toBe(false);
+    expect(isLineRevealed(state, 500)).toBe(false);
+    expect(isLineRevealed(state, 90)).toBe(true);
+  });
+
+  it('reports the target after the reveal that covered it', () => {
+    const revealed = commitReveal({ hiddenTop: 0, hiddenBottom: 36 }, 'up', { from: 17, to: 36 }).state;
+    expect(isLineRevealed(revealed, 20)).toBe(true);
+    expect(isLineRevealed(revealed, 5)).toBe(false);
+  });
+});
+
+describe('lineInGap', () => {
+  it('returns the new-file number for new-side anchors inside the hidden range', () => {
+    const state: GapState = { hiddenTop: 10, hiddenBottom: 50 };
+    expect(lineInGap(state, 0, 'new', 11)).toBe(11);
+    expect(lineInGap(state, 0, 'new', 49)).toBe(49);
+    expect(lineInGap(state, 0, 'new', 10)).toBeNull();
+    expect(lineInGap(state, 0, 'new', 50)).toBeNull();
+  });
+
+  it('shifts old-side anchors by the gap delta', () => {
+    // delta 4: old line 20 is new line 24.
+    const state: GapState = { hiddenTop: 20, hiddenBottom: 60 };
+    expect(lineInGap(state, 4, 'old', 17)).toBe(21);
+    expect(lineInGap(state, 4, 'old', 16)).toBeNull();
+    expect(lineInGap(state, 4, 'old', 55)).toBe(59);
+    expect(lineInGap(state, 4, 'old', 56)).toBeNull();
+  });
+
+  it('treats every line below the top edge as hidden on an open-bottom gap', () => {
+    const state: GapState = { hiddenTop: 90, hiddenBottom: null };
+    expect(lineInGap(state, 0, 'new', 91)).toBe(91);
+    expect(lineInGap(state, 0, 'new', 100000)).toBe(100000);
+    expect(lineInGap(state, 2, 'old', 89)).toBe(91);
+    expect(lineInGap(state, 2, 'old', 88)).toBeNull();
+  });
+});
+
+describe('directionToward', () => {
+  it('reveals from the nearer edge', () => {
+    const state: GapState = { hiddenTop: 10, hiddenBottom: 50 };
+    expect(directionToward(state, 11)).toBe('down');
+    expect(directionToward(state, 30)).toBe('down');
+    expect(directionToward(state, 31)).toBe('up');
+    expect(directionToward(state, 49)).toBe('up');
+  });
+
+  it('always reveals downwards on an open-bottom gap', () => {
+    expect(directionToward({ hiddenTop: 90, hiddenBottom: null }, 91)).toBe('down');
   });
 });
 

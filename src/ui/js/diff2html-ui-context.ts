@@ -1,6 +1,14 @@
 import { DiffFile } from '../../types';
 import { escapeForHtml } from '../../render-utils';
-import { commitReveal, GapState, nextRevealRange, unchangedLineDelta } from '../../context-expand';
+import {
+  commitReveal,
+  directionToward,
+  GapState,
+  isLineRevealed,
+  lineInGap,
+  nextRevealRange,
+  unchangedLineDelta,
+} from '../../context-expand';
 
 export interface ContextExpansionConfig {
   contextProvider?: (path: string, from: number, to: number) => Promise<string[]>;
@@ -10,6 +18,9 @@ export interface ContextExpansionConfig {
 }
 
 const DEFAULT_CHUNK_SIZE = 20;
+
+/** Upper bound on the chunks one `revealLine` call fetches, so a content source that never runs dry cannot loop forever. */
+const MAX_REVEAL_STEPS = 500;
 
 /** Default path resolver: strips the git `a/` / `b/` prefixes from diff paths. */
 export function defaultPathResolver(diffPath: string): string {
@@ -55,6 +66,13 @@ interface Gap {
   state: GapState;
   delta: number;
   views: GapView[];
+  /** True once the placeholders were dropped; the gap is out of play. */
+  removed: boolean;
+}
+
+/** The gaps of one rendered file, in document order. */
+interface FileGaps {
+  gaps: Gap[];
 }
 
 /**
@@ -68,6 +86,8 @@ export class ContextExpansionUI {
   private readonly contextProvider?: (path: string, from: number, to: number) => Promise<string[]>;
   private readonly fileContents?: Map<string, string[]>;
   private readonly pathResolver: (diffPath: string) => string;
+  /** Mounted gaps per rendered file; `revealLine` walks these. */
+  private readonly fileGaps = new Map<DiffFile, FileGaps>();
 
   constructor(config: ContextExpansionConfig = {}) {
     this.chunkSize = config.expandChunkSize ?? DEFAULT_CHUNK_SIZE;
@@ -109,7 +129,8 @@ export class ContextExpansionUI {
       left: null,
       right: rows[which === 'header' ? geometry[i].headerRowIndex : geometry[i].lastRowIndex],
     });
-    this.planGaps(file, filePath, anchorFor).forEach(plan => this.mountGap(plan, false));
+    const gaps = this.planGaps(file, filePath, anchorFor).map(plan => this.mountGap(plan, false));
+    this.fileGaps.set(file, { gaps });
   }
 
   private wireSideBySide(file: DiffFile, leftBody: Element, rightBody: Element): void {
@@ -124,7 +145,8 @@ export class ContextExpansionUI {
       left: leftRows[which === 'header' ? leftGeometry[i].headerRowIndex : leftGeometry[i].lastRowIndex],
       right: rightRows[which === 'header' ? rightGeometry[i].headerRowIndex : rightGeometry[i].lastRowIndex],
     });
-    this.planGaps(file, filePath, anchorFor).forEach(plan => this.mountGap(plan, true));
+    const gaps = this.planGaps(file, filePath, anchorFor).map(plan => this.mountGap(plan, true));
+    this.fileGaps.set(file, { gaps });
   }
 
   /**
@@ -179,8 +201,8 @@ export class ContextExpansionUI {
   }
 
   /** Inserts one placeholder row per planned view and renders its button. */
-  private mountGap(plan: GapPlan, paired: boolean): void {
-    const gap: Gap = { filePath: plan.filePath, state: plan.state, delta: plan.delta, views: [] };
+  private mountGap(plan: GapPlan, paired: boolean): Gap {
+    const gap: Gap = { filePath: plan.filePath, state: plan.state, delta: plan.delta, views: [], removed: false };
     plan.views.forEach(viewPlan => {
       const rows = [buildPlaceholderRow(), ...(paired ? [buildPlaceholderRow()] : [])];
       rows.forEach((row, index) => {
@@ -191,6 +213,7 @@ export class ContextExpansionUI {
       gap.views.push({ direction: viewPlan.direction, rows });
     });
     this.renderGap(gap);
+    return gap;
   }
 
   /** Re-renders every button of the gap from the shared state. */
@@ -206,7 +229,7 @@ export class ContextExpansionUI {
         button.textContent =
           remaining === null ? '⋯ 展开更多 ⋯' : `⋯ ${view.direction === 'up' ? '上方' : '下方'} ${remaining} 行 ⋯`;
         button.addEventListener('click', () => {
-          void this.expand(gap, view);
+          void this.expand(gap, view, view.direction);
         });
         cell.appendChild(button);
       });
@@ -214,24 +237,60 @@ export class ContextExpansionUI {
   }
 
   private removeGap(gap: Gap): void {
+    gap.removed = true;
     gap.views.forEach(view => view.rows.forEach(row => row.remove()));
+  }
+
+  /**
+   * Reveals context until `lineNumber` is rendered, and returns whether it got
+   * there. `side` follows review anchors: `old` anchors address the old file,
+   * so they are shifted by the gap's line-number delta. Returns false when the
+   * line is not hidden by any gap (already rendered, or absent) or the content
+   * source ran out first.
+   */
+  async revealLine(file: DiffFile, side: 'old' | 'new', lineNumber: number): Promise<boolean> {
+    const target = this.findGapTarget(this.fileGaps.get(file)?.gaps ?? [], side, lineNumber);
+    if (target === null) return false;
+
+    for (let step = 0; step < MAX_REVEAL_STEPS; step += 1) {
+      if (isLineRevealed(target.gap.state, target.newLineNumber)) return true;
+      const direction = directionToward(target.gap.state, target.newLineNumber);
+      const progressed = await this.expand(target.gap, target.view, direction);
+      if (!progressed) return false;
+    }
+    return false;
+  }
+
+  /** The live gap hiding one anchor line, with the new-file number to reveal to. */
+  private findGapTarget(
+    gaps: Gap[],
+    side: 'old' | 'new',
+    lineNumber: number,
+  ): { gap: Gap; view: GapView; newLineNumber: number } | null {
+    for (const gap of gaps) {
+      if (gap.removed) continue;
+      const newLineNumber = lineInGap(gap.state, gap.delta, side, lineNumber);
+      if (newLineNumber !== null) return { gap, view: gap.views[0], newLineNumber };
+    }
+    return null;
   }
 
   /**
    * Reveals one chunk of context into one of the gap's views. Both views
    * share the gap state: whichever side is clicked, the counts of all
    * views stay in sync, and when the two sides meet every placeholder of
-   * the gap is removed at once.
+   * the gap is removed at once. Returns whether lines were actually
+   * inserted, which `revealLine` uses to detect a dry content source.
    */
-  private async expand(gap: Gap, view: GapView): Promise<void> {
+  private async expand(gap: Gap, view: GapView, direction: ExpandDirection): Promise<boolean> {
     const buttons = view.rows.flatMap(row => Array.from(row.querySelectorAll<HTMLButtonElement>('button')));
-    if (buttons.some(button => button.disabled)) return;
+    if (buttons.some(button => button.disabled)) return false;
     buttons.forEach(button => (button.disabled = true));
 
-    const range = nextRevealRange(gap.state, view.direction, this.chunkSize);
+    const range = nextRevealRange(gap.state, direction, this.chunkSize);
     if (range === null) {
       this.removeGap(gap);
-      return;
+      return false;
     }
 
     const openBottom = gap.state.hiddenBottom === null;
@@ -244,14 +303,14 @@ export class ContextExpansionUI {
       if (revealed.length === 0) {
         if (openBottom) this.removeGap(gap);
         else this.renderGap(gap); // defensive: the content source came up empty
-        return;
+        return false;
       }
 
       const format: RenderFormat = view.rows.length === 2 ? 'side-by-side' : 'line-by-line';
-      if (view.direction === 'up') this.insertBelow(view, gap.delta, range.from, revealed, format);
+      if (direction === 'up') this.insertBelow(view, gap.delta, range.from, revealed, format);
       else this.insertAbove(view, gap.delta, range.from, revealed, format);
 
-      const outcome = commitReveal(gap.state, view.direction, {
+      const outcome = commitReveal(gap.state, direction, {
         from: range.from,
         to: range.from + revealed.length - 1,
       });
@@ -259,14 +318,16 @@ export class ContextExpansionUI {
 
       if (outcome.exhausted || (openBottom && !hasMore)) {
         this.removeGap(gap);
-        return;
+        return true;
       }
       this.renderGap(gap);
+      return true;
     } catch (error) {
       buttons.forEach(button => {
         button.disabled = false;
         button.textContent = `加载失败: ${(error as Error).message}`;
       });
+      return false;
     }
   }
 
@@ -276,14 +337,16 @@ export class ContextExpansionUI {
     const leftRow = view.rows.length === 2 ? view.rows[0] : null;
     revealed.forEach((content, idx) => {
       const newNumber = from + idx;
-      const oldNumber = newNumber - delta;
-      rightRow.parentNode!.insertBefore(buildContextLineRow(newNumber, content, format), rightRow);
-      if (leftRow !== null) {
-        leftRow.parentNode!.insertBefore(
-          buildContextLineRow(oldNumber < 1 ? null : oldNumber, content, format),
-          leftRow,
+      const oldNumber = contextNumber(newNumber - delta);
+      if (leftRow === null) {
+        rightRow.parentNode!.insertBefore(
+          buildContextLineRow({ old: oldNumber, new: newNumber }, content, format),
+          rightRow,
         );
+        return;
       }
+      rightRow.parentNode!.insertBefore(buildContextLineRow({ old: null, new: newNumber }, content, format), rightRow);
+      leftRow.parentNode!.insertBefore(buildContextLineRow({ old: oldNumber, new: null }, content, format), leftRow);
     });
   }
 
@@ -295,12 +358,15 @@ export class ContextExpansionUI {
     let leftAnchor: ChildNode | null = leftRow;
     revealed.forEach((content, idx) => {
       const newNumber = from + idx;
-      const oldNumber = newNumber - delta;
-      const rightLine = buildContextLineRow(newNumber, content, format);
+      const oldNumber = contextNumber(newNumber - delta);
+      const rightLine =
+        leftRow === null
+          ? buildContextLineRow({ old: oldNumber, new: newNumber }, content, format)
+          : buildContextLineRow({ old: null, new: newNumber }, content, format);
       rightAnchor.parentNode!.insertBefore(rightLine, rightAnchor.nextSibling);
       rightAnchor = rightLine;
       if (leftAnchor !== null) {
-        const leftLine = buildContextLineRow(oldNumber < 1 ? null : oldNumber, content, format);
+        const leftLine = buildContextLineRow({ old: oldNumber, new: null }, content, format);
         leftAnchor.parentNode!.insertBefore(leftLine, leftAnchor.nextSibling);
         leftAnchor = leftLine;
       }
@@ -366,28 +432,46 @@ function buildPlaceholderRow(): HTMLTableRowElement {
   return row;
 }
 
-/** Builds one revealed context line matching the row shape of the given format; `lineNumber` may be null for a filler row. */
-function buildContextLineRow(lineNumber: number | null, content: string, format: RenderFormat): HTMLTableRowElement {
+/** Old-file number of a revealed context line, or null when the line has no old counterpart (it predates the file start). */
+function contextNumber(oldNumber: number): number | null {
+  return oldNumber < 1 ? null : oldNumber;
+}
+
+/**
+ * Builds one revealed context line matching the row shape of the given format.
+ * A side-by-side row is given the single number of its own side; a
+ * line-by-line row is given both numbers, because unchanged context lines have
+ * an old and a new number that differ by the gap delta.
+ */
+function buildContextLineRow(
+  numbers: { old: number | null; new: number | null },
+  content: string,
+  format: RenderFormat,
+): HTMLTableRowElement {
   const row = document.createElement('tr');
-  row.className = 'd2h-context-line' + (lineNumber === null ? ' d2h-context-filler' : '');
-  const empty = lineNumber === null;
-  const numberHtml = empty ? '&nbsp;' : String(lineNumber);
+  const empty = numbers.old === null && numbers.new === null;
+  row.className = 'd2h-context-line' + (empty ? ' d2h-context-filler' : '');
   const contentHtml = empty ? '&nbsp;' : escapeForHtml(content);
 
   if (format === 'side-by-side') {
+    const number = numbers.new ?? numbers.old;
+    const numberHtml = number === null ? '&nbsp;' : String(number);
     row.innerHTML =
       `<td class="d2h-code-side-linenumber d2h-cntx">\n${numberHtml}\n</td>\n` +
       `<td class="d2h-cntx">\n<div class="d2h-code-side-line">\n<span class="d2h-code-line-prefix">&nbsp;</span>\n<span class="d2h-code-line-ctn">${contentHtml}</span>\n</div>\n</td>`;
     return row;
   }
 
+  const oldHtml = numbers.old === null ? '&nbsp;' : String(numbers.old);
+  const newHtml = numbers.new === null ? '&nbsp;' : String(numbers.new);
+
   // Whitespace text nodes match the mustache-rendered rows: inline elements
   // separated by whitespace collapse to one space, and skipping them shifts
   // the content ~7px left of the diff lines.
   row.innerHTML =
     `<td class="d2h-code-linenumber d2h-cntx">\n` +
-    `    <div class="line-num1">${numberHtml}</div>\n` +
-    `    <div class="line-num2">${numberHtml}</div>\n` +
+    `    <div class="line-num1">${oldHtml}</div>\n` +
+    `    <div class="line-num2">${newHtml}</div>\n` +
     `</td>\n` +
     `<td class="d2h-cntx">\n` +
     `    <div class="d2h-code-line">\n` +

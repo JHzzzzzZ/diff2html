@@ -63,6 +63,40 @@ export function commitReveal(state: GapState, direction: 'up' | 'down', range: E
 }
 
 /**
+ * True when `newLineNumber` is already rendered on one of the gap's sides: at
+ * or above the last line revealed from the top, or at or below the first line
+ * revealed from the bottom.
+ */
+export function isLineRevealed(state: GapState, newLineNumber: number): boolean {
+  if (newLineNumber <= state.hiddenTop) return true;
+  return state.hiddenBottom !== null && newLineNumber >= state.hiddenBottom;
+}
+
+/**
+ * Maps a comment anchor to the new-file line number a gap hides, or null when
+ * that gap does not hide the line (it is rendered already, or absent).
+ * Revealed context lines are unchanged between versions, so an old-file anchor
+ * sits `delta` lines away from its new-file number.
+ */
+export function lineInGap(state: GapState, delta: number, side: 'old' | 'new', lineNumber: number): number | null {
+  const top = side === 'new' ? state.hiddenTop : state.hiddenTop - delta;
+  const bottom = state.hiddenBottom === null ? null : side === 'new' ? state.hiddenBottom : state.hiddenBottom - delta;
+  if (lineNumber <= top) return null;
+  if (bottom !== null && lineNumber >= bottom) return null;
+  return side === 'new' ? lineNumber : lineNumber + delta;
+}
+
+/**
+ * Reveal direction that reaches `newLineNumber` with the fewest lines. Both
+ * directions advance by chunks, so the nearer edge wins; the open-bottom gap
+ * can only be revealed downwards.
+ */
+export function directionToward(state: GapState, newLineNumber: number): 'up' | 'down' {
+  if (state.hiddenBottom === null) return 'down';
+  return newLineNumber - state.hiddenTop <= state.hiddenBottom - newLineNumber ? 'down' : 'up';
+}
+
+/**
  * Line-number delta between the two files across an unchanged gap.
  * `gapIndex < blocks.length` refers to the gap before `blocks[gapIndex]`
  * (delta = its newStart − oldStart); `gapIndex === blocks.length` refers to

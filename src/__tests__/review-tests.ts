@@ -1,4 +1,4 @@
-import { ReviewStore } from '../review';
+import { newCommentId, ReviewStore } from '../review';
 
 describe('review', () => {
   it('adds a line comment anchored to the new line number and exposes it in export JSON', () => {
@@ -127,5 +127,77 @@ describe('review', () => {
   it('rejects malformed review JSON on import', () => {
     const store = new ReviewStore();
     expect(() => store.import('"not an array"')).toThrow('Invalid review JSON: expected an array of comments');
+    expect(() => store.import('{oops')).toThrow(/^Invalid review JSON: /);
+  });
+
+  it('imports valid entries and reports counts and reasons for the rest', () => {
+    const store = new ReviewStore();
+    const result = store.import(
+      JSON.stringify([
+        { filePath: 'src/app.ts', lineNumber: 3, side: 'new', author: 'alice', text: '  line note  ' },
+        { filePath: 'src/app.ts', text: 'file note' },
+        null,
+        [1],
+        { lineNumber: 1, side: 'new', text: 'no filePath' },
+        { filePath: 'src/app.ts', text: 42 },
+        { filePath: 'src/app.ts', lineNumber: 0, side: 'new', text: 'bad line' },
+        { filePath: 'src/app.ts', lineNumber: 2.5, side: 'new', text: 'fractional line' },
+        { filePath: 'src/app.ts', lineNumber: 2, text: 'no side' },
+        { filePath: 'src/app.ts', lineNumber: 4, side: 'new', text: 'kept' },
+      ]),
+    );
+
+    expect(result.total).toBe(10);
+    expect(result.imported).toBe(3);
+    expect(result.skipped).toBe(7);
+    expect(result.errors).toHaveLength(7);
+    expect(result.errors[0]).toContain('#3');
+    expect(result.errors[1]).toContain('#4');
+
+    expect(store.all()).toHaveLength(3);
+    expect(store.all()[0]).toMatchObject({ filePath: 'src/app.ts', text: 'line note', author: 'alice' });
+    expect(store.all()[0].id).toBeTruthy();
+    expect(store.all()[0].createdAt).toEqual(expect.any(Number));
+    // A missing author falls back to `anonymous`; file comments have no line anchor.
+    expect(store.all()[1]).toMatchObject({ author: 'anonymous', lineNumber: undefined });
+    expect(store.all()[2]).toMatchObject({ author: 'anonymous', text: 'kept' });
+  });
+
+  it('keeps the imported id when present and reassigns duplicated ones', () => {
+    const store = new ReviewStore();
+    store.import(
+      JSON.stringify([
+        { id: 'keep-me', filePath: 'src/app.ts', author: 'a', text: 'first' },
+        { id: 'keep-me', filePath: 'src/app.ts', author: 'a', text: 'second' },
+      ]),
+    );
+
+    const ids = store.all().map(comment => comment.id);
+    expect(ids[0]).toBe('keep-me');
+    expect(ids[1]).not.toBe('keep-me');
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('hands out comment copies from all()', () => {
+    const store = new ReviewStore();
+    store.addFileComment({ filePath: 'src/app.ts', author: 'a', text: 'x' });
+
+    const comments = store.all();
+    comments.length = 0;
+    expect(store.all()).toHaveLength(1);
+  });
+
+  it('reports a miss when editing or deleting an unknown comment', () => {
+    const store = new ReviewStore();
+    expect(store.editComment('nope', 'x')).toBe(false);
+    expect(store.deleteComment('nope')).toBe(false);
+  });
+
+  it('accepts a caller-owned comment id', () => {
+    const store = new ReviewStore();
+    const id = newCommentId();
+    store.addLineComment({ filePath: 'src/app.ts', lineNumber: 1, side: 'new', author: 'a', text: 'x' }, id);
+
+    expect(store.all()[0].id).toBe(id);
   });
 });

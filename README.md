@@ -174,7 +174,8 @@ stickyFileHeaders(): void
 - `pathResolver`: maps a diff path (e.g. `a/src/app.ts`) to the real path used for content lookup; defaults to stripping
   the `a/` / `b/` prefix
 - `expandChunkSize`: number of context lines revealed per expand click, default is `20`
-- `review`: enable review comments on lines and files: `true` or `false`, default is `false`
+- `review`: enable review comments, the comment navigation panel and the `exportReview` / `importReview` methods: `true`
+  or `false`, default is `false`
 - `author`: author name stamped on review comments, default is `anonymous`
 - `onReviewChange`: callback invoked with the review JSON after every comment change
 - `fileCopyButton`: add a copy-to-clipboard button next to each file name (copies the file path): `true` or `false`,
@@ -189,6 +190,10 @@ animated comment button into its number gutter (faint over the code, solid over 
 line number itself, to comment on the line. The header button comments on the whole file. Comments are anchored to
 `(file, line number, side)` and survive context expansion.
 
+Lines that already carry comments keep their gutter marker visible, and the toolbar button counts every comment and
+opens a navigation panel with one entry per comment, grouped by file: clicking an entry scrolls to it, revealing its
+collapsed line first when needed. The panel opens by itself after an import.
+
 ```ts
 const ui = new Diff2HtmlUI(target, diffString, {
   review: true,
@@ -198,8 +203,15 @@ const ui = new Diff2HtmlUI(target, diffString, {
 ui.draw();
 
 const json = ui.exportReview(); // serialize comments to JSON
-ui.importReview(json); // restore them later
+const report = await ui.importReview(json); // restore them later
+// report: { total, imported, skipped, placed, unplaced, errors, message }
 ```
+
+`importReview` replaces the current review and never fails because of a single bad entry: entries that fail validation
+are counted in `skipped` (with one reason per entry in `errors`), and accepted comments whose file or line is not part
+of the rendered diff are counted in `unplaced`. Only unparseable JSON rejects the returned promise. The toolbar shows
+the same counts next to the buttons as `导入完成：成功 11 / 14 条，2 条格式无效，1 条在 diff 中找不到位置`, or
+`导入失败：…` when the JSON could not be read.
 
 Context expansion and review work in both `line-by-line` and `side-by-side` output formats. In `side-by-side` mode the
 revealed chunk is inserted into both panes with the left pane renumbered to match the old file, and review rows inserted

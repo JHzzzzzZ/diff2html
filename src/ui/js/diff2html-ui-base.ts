@@ -5,7 +5,8 @@ import { DiffFile } from '../../types';
 import { getHtmlId } from '../../render-utils';
 import { HighlightResult, HLJSApi } from 'highlight.js';
 import { ContextExpansionConfig, ContextExpansionUI } from './diff2html-ui-context';
-import { ReviewUI, ReviewUIConfig } from './diff2html-ui-review';
+import { ReviewImportReport, ReviewUI, ReviewUIConfig } from './diff2html-ui-review';
+import { CommentSide } from '../../review';
 
 export interface Diff2HtmlUIConfig extends Diff2HtmlConfig, ContextExpansionConfig, ReviewUIConfig {
   synchronisedScroll?: boolean;
@@ -22,7 +23,7 @@ export interface Diff2HtmlUIConfig extends Diff2HtmlConfig, ContextExpansionConf
   stickyFileHeaders?: boolean;
   /** Enables dynamic context expansion; requires `contextProvider` or `fileContents`. */
   contextExpansion?: boolean;
-  /** Enables review comments; adds `exportReview` / `importReview` to the UI instance. */
+  /** Enables review comments, the comment navigation panel and `exportReview` / `importReview`. */
   review?: boolean;
   /** Adds a copy-to-clipboard button next to each file name; default is `true`. */
   fileCopyButton?: boolean;
@@ -67,7 +68,11 @@ export class Diff2HtmlUI {
     this.targetElement = target;
     if (hljs !== undefined) this.hljs = hljs;
     if (this.config.review) {
-      this.review = new ReviewUI({ author: config.author, onReviewChange: config.onReviewChange });
+      this.review = new ReviewUI({
+        author: config.author,
+        onReviewChange: config.onReviewChange,
+        revealLine: (file, side, lineNumber) => this.revealLine(file, side, lineNumber),
+      });
     }
     if (this.config.contextExpansion && (config.contextProvider !== undefined || config.fileContents !== undefined)) {
       this.contextExpansion = new ContextExpansionUI({
@@ -100,10 +105,20 @@ export class Diff2HtmlUI {
     return this.review.exportReview();
   }
 
-  /** Loads a review previously produced by `exportReview` (requires `review: true`). */
-  importReview(json: string): void {
+  /**
+   * Loads a review previously produced by `exportReview` (requires
+   * `review: true`). Resolves with what was imported, skipped and placed;
+   * comments on collapsed lines are revealed first.
+   */
+  importReview(json: string): Promise<ReviewImportReport> {
     if (this.review === undefined) throw new Error('Review is not enabled. Pass `review: true` in the config.');
-    this.review.importReview(json);
+    return this.review.importReview(json);
+  }
+
+  /** Bridge to the context expansion UI; without it no line can be revealed. */
+  private revealLine(file: DiffFile, side: CommentSide, lineNumber: number): Promise<boolean> {
+    if (this.contextExpansion === undefined) return Promise.resolve(false);
+    return this.contextExpansion.revealLine(file, side, lineNumber);
   }
 
   private fileCopyButtons(): void {

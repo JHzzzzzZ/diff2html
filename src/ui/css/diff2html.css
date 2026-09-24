@@ -97,7 +97,10 @@
 .d2h-file-header.d2h-sticky-header {
   position: sticky;
   top: 0;
-  z-index: 1;
+  /* Above the number gutter cells and the comment affordance (both live in a
+     z-index: 1 stacking context), so rows scroll under the pinned header
+     instead of painting over it. */
+  z-index: 3;
 }
 
 .d2h-file-stats {
@@ -853,6 +856,7 @@ td.d2h-info > .d2h-code-side-line {
   padding: 6px 8px;
   background-color: var(--d2h-file-header-bg-color);
   border: 1px solid var(--d2h-border-color);
+  border-left: 3px solid var(--d2h-moved-label-color);
   border-radius: 3px;
   font-family: sans-serif;
   font-size: 13px;
@@ -861,6 +865,13 @@ td.d2h-info > .d2h-code-side-line {
 .d2h-review-meta {
   font-weight: bold;
   margin-bottom: 2px;
+}
+
+.d2h-review-anchor {
+  margin-left: 8px;
+  font-weight: normal;
+  color: var(--d2h-dim-color);
+  font-size: 11px;
 }
 
 .d2h-review-actions button,
@@ -873,6 +884,8 @@ td.d2h-info > .d2h-code-side-line {
 
 .d2h-review-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-bottom: 1em;
 }
@@ -885,6 +898,167 @@ td.d2h-info > .d2h-code-side-line {
   background: none;
   padding: 4px 10px;
   white-space: nowrap;
+}
+
+/* Active state of the panel toggle. */
+.d2h-review-toolbar .d2h-review-summary-btn-on {
+  border-color: var(--d2h-moved-label-color);
+  color: var(--d2h-moved-label-color);
+}
+
+/* Import feedback: how many comments arrived, and why the rest did not. */
+.d2h-review-status {
+  font-family: sans-serif;
+  font-size: 12px;
+}
+
+.d2h-review-status-ok {
+  color: var(--d2h-ins-label-color);
+}
+
+.d2h-review-status-warn {
+  color: var(--d2h-change-label-color);
+}
+
+.d2h-review-status-error {
+  color: var(--d2h-del-label-color);
+}
+
+/* Comment navigation: a fixed drawer, so it stays reachable while the diff
+   scrolls, listing every comment grouped by file. */
+.d2h-review-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  width: min(340px, 90vw);
+  background-color: var(--d2h-bg-color);
+  border-left: 1px solid var(--d2h-border-color);
+  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.12);
+  font-family: sans-serif;
+  font-size: 13px;
+}
+
+.d2h-review-panel-open {
+  display: flex;
+}
+
+.d2h-review-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--d2h-border-color);
+  background-color: var(--d2h-file-header-bg-color);
+}
+
+.d2h-review-panel-title {
+  font-weight: bold;
+}
+
+.d2h-review-panel-count {
+  color: var(--d2h-dim-color);
+  font-size: 12px;
+}
+
+.d2h-review-panel-close {
+  margin-left: auto;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--d2h-dim-color);
+}
+
+.d2h-review-list {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+.d2h-review-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--d2h-dim-color);
+  word-break: break-all;
+}
+
+.d2h-review-group-count {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 8px;
+  background-color: var(--d2h-selected-color);
+  color: var(--d2h-moved-label-color);
+}
+
+.d2h-review-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.d2h-review-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 10px 5px 16px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+
+.d2h-review-item:hover {
+  background-color: var(--d2h-file-header-bg-color);
+  border-left-color: var(--d2h-moved-label-color);
+}
+
+.d2h-review-item-anchor {
+  flex-shrink: 0;
+  color: var(--d2h-moved-label-color);
+  font-size: 12px;
+}
+
+.d2h-review-item-text {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+
+.d2h-review-item-author {
+  color: var(--d2h-dim-color);
+  font-size: 11px;
+}
+
+.d2h-review-empty {
+  padding: 8px 10px;
+  color: var(--d2h-dim-color);
+}
+
+/* Pulse on the card a navigation entry jumped to. */
+.d2h-review-flash {
+  animation: d2h-review-flash-pulse 1.5s ease-out 1;
+}
+
+@keyframes d2h-review-flash-pulse {
+  0% {
+    box-shadow: 0 0 0 3px rgba(53, 114, 176, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 3px rgba(53, 114, 176, 0);
+  }
 }
 
 .d2h-file-copy-btn {
@@ -956,6 +1130,27 @@ td.d2h-info > .d2h-code-side-line {
   border-color: var(--d2h-moved-label-color);
 }
 
+/* Commented lines keep their marker visible, so existing comments are not
+   hidden behind a hover. */
+.d2h-review-hint.d2h-review-hint-marked {
+  width: auto;
+  min-width: 1.5em;
+  padding: 0 4px;
+  border-radius: 999px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(0.92);
+  color: var(--d2h-moved-label-color);
+  border-color: var(--d2h-moved-label-color);
+  background-color: var(--d2h-selected-color);
+  font-size: 12px;
+}
+
+.d2h-file-header .d2h-review-file-btn-on {
+  border-color: var(--d2h-moved-label-color);
+  color: var(--d2h-moved-label-color);
+}
+
 /* Side-by-side numbers are right aligned, so the left of that cell is free. */
 .d2h-code-side-linenumber .d2h-review-hint {
   left: 0.85em;
@@ -976,6 +1171,10 @@ td.d2h-info > .d2h-code-side-line {
   .d2h-review-hint.d2h-review-hint-on,
   .d2h-review-hint.d2h-review-hint-on.d2h-review-hint-solid {
     transition: none;
+    animation: none;
+  }
+
+  .d2h-review-flash {
     animation: none;
   }
 }
