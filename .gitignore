@@ -32,6 +32,15 @@ bower_components/
 # Compiled templates
 /src/diff2html-templates.*
 
+# Local demo scratch (rebuilt from the bundles by .rebuild-demos.mjs)
+/demo*.html
+/demo*.diff
+/demo-contents.json
+/review-demo.json
+/serve-demo.js
+/.demo-server.mjs
+/.rebuild-demos.mjs
+
 # Compiled website
 /docs/
 

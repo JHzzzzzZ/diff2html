@@ -68,7 +68,20 @@ export default [
     },
   },
   {
-    ignores: ['src/diff2html-templates.*', 'coverage/', 'docs/', 'bundles-out/', 'bundles/', 'lib/', 'lib-esm/'],
+    ignores: [
+      'src/diff2html-templates.*',
+      'coverage/',
+      'docs/',
+      'bundles-out/',
+      'bundles/',
+      'lib/',
+      'lib-esm/',
+      // Local demo scratch, rebuilt from the bundles and never shipped.
+      'demo*.html',
+      'serve-demo.js',
+      '.demo-server.mjs',
+      '.rebuild-demos.mjs',
+    ],
   },
   {
     ...tseslint.configs.disableTypeChecked,
